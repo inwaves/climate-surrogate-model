@@ -4,3 +4,4 @@ proplot
 matplotlib
 pandas
 intake-esm
+gcsfs
