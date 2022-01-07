@@ -3,3 +3,4 @@ xarray
 proplot
 matplotlib
 pandas
+intake-esm
