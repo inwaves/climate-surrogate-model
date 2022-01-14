@@ -1,12 +1,11 @@
 import argparse
+import warnings
 
 import GPy
 import GPyOpt
-import numpy as np
-import warnings
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-
 from numpy.random import seed
 from scipy.stats import multivariate_normal as mvn
 
@@ -23,7 +22,12 @@ def draw_samples(y_mean, y_std):
     return y_pred
 
 
-def log(out, experiment_params, optimal_hparams, final_error):
+def log(out, args, optimal_hparams, final_error):
+    out.writelines(f"Latitude: {args.lat}, Longitude: {args.lon},"
+                   f"Number of months: {args.num_months}, Number of iterations: {args.num_iterations}\n"
+                   f"Domain of lengthscale1: {args.domain_ls1}, lengthscale2: {args.domain_ls2}, lengthscale3: {args.domain_ls3}, "
+                   f"Domain of variance1: {args.domain_v1}, variance2: {args.domain_v2}")
+
     out.writelines(f"ls1: {str(optimal_hparams[0])}, ls2: {str(optimal_hparams[1])}, "
                    f"ls3: {str(optimal_hparams[2])}, v1: {str(optimal_hparams[3])}, "
                    f"v2: {str(optimal_hparams[4])}, best_error: {final_error}\n")
@@ -82,13 +86,16 @@ def fit_gp(hyperparameters):
     return rmse
 
 
-def optimise(maximum_iterations=10, acquisition_type="LCB", acquisition_weight=0.1):
+def optimise(maximum_iterations=10, dom_tuples=None, acquisition_type="LCB", acquisition_weight=0.1):
+    if dom_tuples is None:
+        dom_tuples = [(0., 5.), (0., 1.), (0., 5.), (0., 1.), (0., 1.)]
+
     domain = [
-        {'name': 'lengthscale1', 'type': 'continuous', 'domain': (0., 5.)},
-        {'name': 'lengthscale2', 'type': 'continuous', 'domain': (0., 1.)},
-        {'name': 'lengthscale3', 'type': 'continuous', 'domain': (0., 5.)},
-        {'name': 'variance1', 'type': 'continuous', 'domain': (0., 1.)},
-        {'name': 'variance2', 'type': 'continuous', 'domain': (0., 1.)}]
+        {'name': 'lengthscale1', 'type': 'continuous', 'domain': dom_tuples[0]},
+        {'name': 'lengthscale2', 'type': 'continuous', 'domain': dom_tuples[1]},
+        {'name': 'lengthscale3', 'type': 'continuous', 'domain': dom_tuples[2]},
+        {'name': 'variance1', 'type': 'continuous', 'domain': dom_tuples[3]},
+        {'name': 'variance2', 'type': 'continuous', 'domain': dom_tuples[4]}]
 
     # TODO: add support for multiple models
     # TODO: add support for multiple optimizers
@@ -124,7 +131,6 @@ def optimise(maximum_iterations=10, acquisition_type="LCB", acquisition_weight=0
 
 
 def plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, filename):
-    # TODO: Get this out to a file.
     plt.figure(figsize=(10, 5), dpi=100)
     plt.xlabel("time")
     plt.ylabel("precipitation")
@@ -140,18 +146,54 @@ def plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, fi
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the GPyOpt optimisation algorithm.')
 
-    # lat, lon, how many entries
-    # how many iterations, domain1, domain2, domain3, domain4, domain5
+    parser.add_argument("--lat", default=51.875, type=float,
+                        help="The latitude of the point we want to investigate. Defaults to 51.875.")
+    parser.add_argument("--lon", default=0.9375, type=float,
+                        help="The longitude of the point we want to investigate. Defaults to 0.9375.")
+    parser.add_argument("--num_months", default=1980, type=int,
+                        help="How many months of data to consider, starting 01-01-1850. Defaults to 1980.")
+    parser.add_argument("--training_size", default=0.8, type=float,
+                        help="Percentage of the data to use for training. Defaults to 0.8.")
+    parser.add_argument("--num_iterations", default=20, type=int,
+                        help="Number of iterations of bayesian optimisation. Defaults to 20.")
+    parser.add_argument("--domain_ls1", type=str,
+                        help="The domain of the first hyperparameter (lengthscale1). Enter as start, finish")
+    parser.add_argument("--domain_ls2", type=str,
+                        help="The domain of the second hyperparameter (lengthscale2). Enter as start, finish")
+    parser.add_argument("--domain_ls3", type=str,
+                        help="The domain of the third hyperparameter (lengthscale3). Enter as start, finish")
+    parser.add_argument("--domain_v1", type=str,
+                        help="The domain of the fourth hyperparameter (variance1). Enter as start, finish")
+    parser.add_argument("--domain_v2", type=str,
+                        help="The domain of the fifth hyperparameter (variance2). Enter as start, finish")
+    parser.add_argument("--acquisition_type", default="LCB", type=str,
+                        help="Type of acquisition function to use in bayesian optimisation. Defaults to LCB.")
+    parser.add_argument("--acquisition_weight", default=0.1, type=float,
+                        help="The weight of the acquisition function. Defaults to 0.1")
 
-    # TODO: parse the args, collect them into a list for logging
+    args = parser.parse_args()
+    parsed_domain_tuples = []
 
-    experiment_params = []
+    # TODO: unit test the tuple parsing.
+    for domain in [args.domain_ls1, args.domain_ls2, args.domain_ls3, args.domain_v1, args.domain_v2]:
+        if domain is not None:
+            bounds = domain.split(",")
+            parsed_domain_tuples.append((float(bounds[0]), float(bounds[1])))
+
     # Load the data.
-    x_train, y_train, x_test, y_test, x_all, y_all = load_data(total_entries=100)
-    optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=10)
+    x_train, y_train, x_test, y_test, x_all, y_all = load_data(lat=args.lat,
+                                                               lon=args.lon,
+                                                               total_entries=args.num_months)
+
+    optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
+                                                          dom_tuples=parsed_domain_tuples,
+                                                          acquisition_type=args.acquisition_type,
+                                                          acquisition_weight=args.acquisition_weight)
+
+    # TODO: figure out a suitable filename.
     composite_filename = f"something"
 
     out = open(f"{composite_filename}.txt", "w")
-    log(out, experiment_params, optimal_hparams, best_error)
+    log(out, args, optimal_hparams, best_error)
 
     plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
