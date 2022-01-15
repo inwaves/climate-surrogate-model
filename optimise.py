@@ -92,6 +92,12 @@ def fit_gp(hyperparameters):
     return loss
 
 
+def grid_search_domains():
+    """Implement grid search over the hyperparameter domains.
+    This should let you run multiple optimisation experiments and log them."""
+    pass
+
+
 def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_design_type="random",
              acquisition_type="LCB", acquisition_weight=0.1, acquisition_optimiser_type="lbfgs") -> tuple:
     if dom_tuples is None:
@@ -114,7 +120,9 @@ def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_de
 
     # Optimise the hyperparameters.
     opt.run_optimization(max_iter=maximum_iterations)
-    opt.plot_convergence()  # TODO: get these out to a file.
+
+    # To plot optimisation details uncomment this:
+    # opt.plot_convergence(filename="optimisation_details.png")
 
     # Get the optimised hyperparameters.
     optimal_hparams = opt.X[np.argmin(opt.Y)]
@@ -210,10 +218,11 @@ if __name__ == '__main__':
                                                           acquisition_optimiser_type=args.acquisition_optimiser_type, )
     toc = time.perf_counter()
 
-    # TODO: figure out a suitable filename.
-    composite_filename = f"something"
+    composite_filename = f"/logs/{args.model_type}_{args.acquisition_type}_{args.acquisition_optimiser_type}_" \
+                         f"{str(args.lat).replace('.', 'p')}_{str(args.lon).replace('.', 'p')}_" \
+                         f"{args.num_iterations}_{args.num_months}_{args.training_size}"
 
-    out = open(f"{composite_filename}.txt", "w")
+    out = open(f"{composite_filename}.txt", "a")
     log(out, args, optimal_hparams, best_error, toc - tic)
 
     plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
