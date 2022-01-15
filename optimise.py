@@ -6,6 +6,8 @@ import GPyOpt
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from functools import partial
 from numpy.random import seed
 from scipy.stats import multivariate_normal as mvn
 
@@ -56,15 +58,18 @@ def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
     return x_train, y_train, x_test, y_test, x_all, y_all
 
 
+def rms_error(y_true, y_pred) -> float:
+    """Calculate the root mean squared error."""
+    return np.sqrt(np.square(y_true - y_pred).mean())
+
+
 def fit_gp(hyperparameters):
     """This is the function that GPyOpt will optimise.
         parameter hyperparameters: A vector containing the hyperparameters to optimise.
         return: The root mean squared error of the model.
     """
 
-    # TODO: add support for multiple loss functions.
-    rmse = 0
-    print(f"Hyperparams shape: {hyperparameters.shape}")
+    loss = 0
     for i in range(hyperparameters.shape[0]):
         kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 3]) + \
                  GPy.kern.StdPeriodic(1, lengthscale=hyperparameters[i, 1]) * \
@@ -77,16 +82,16 @@ def fit_gp(hyperparameters):
         # Calculate RMSE — does it even make sense to use RMSE since
         # a GP doesn't make exact predictions, but specifies distributions
         # over functions?
-        rmse += np.sqrt(np.square(y_all - y_pred).mean())
+        loss += rms_error(y_all, y_pred)
 
         # This used to be rmse += np.sum(all_y - y_pred)
         # which isn't the actual RMSE, but gave the positive definite error fewer times.
 
-    print(f"RMSE: {rmse}")
-    return rmse
+    return loss
 
 
-def optimise(maximum_iterations=10, dom_tuples=None, acquisition_type="LCB", acquisition_weight=0.1):
+def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_design_type="random",
+             acquisition_type="LCB", acquisition_weight=0.1, acquisition_optimiser_type="lbfgs") -> tuple:
     if dom_tuples is None:
         dom_tuples = [(0., 5.), (0., 1.), (0., 5.), (0., 1.), (0., 1.)]
 
@@ -102,8 +107,11 @@ def optimise(maximum_iterations=10, dom_tuples=None, acquisition_type="LCB", acq
 
     opt = GPyOpt.methods.BayesianOptimization(f=fit_gp,  # function to optimize
                                               domain=domain,  # box-constraints of the problem
-                                              acquisition_type=acquisition_type,
-                                              acquisition_weight=acquisition_weight)
+                                              model_type=model_type,  # model type
+                                              initial_design_type=initial_design_type,  # initial design
+                                              acquisition_type=acquisition_type,  # acquisition function
+                                              acquisition_weight=acquisition_weight,
+                                              acquisition_optimizer_type=acquisition_optimiser_type)
 
     # Optimise the hyperparameters.
     opt.run_optimization(max_iter=maximum_iterations)
@@ -146,16 +154,14 @@ def plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, fi
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the GPyOpt optimisation algorithm.')
 
-    parser.add_argument("--lat", default=51.875, type=float,
-                        help="The latitude of the point we want to investigate. Defaults to 51.875.")
-    parser.add_argument("--lon", default=0.9375, type=float,
-                        help="The longitude of the point we want to investigate. Defaults to 0.9375.")
-    parser.add_argument("--num_months", default=1980, type=int,
-                        help="How many months of data to consider, starting 01-01-1850. Defaults to 1980.")
-    parser.add_argument("--training_size", default=0.8, type=float,
-                        help="Percentage of the data to use for training. Defaults to 0.8.")
-    parser.add_argument("--num_iterations", default=20, type=int,
-                        help="Number of iterations of bayesian optimisation. Defaults to 20.")
+    parser.add_argument("--acquisition_type", default="LCB", type=str,
+                        help="Type of acquisition function to use in bayesian optimisation. "
+                             "Defaults to LCB. Choose from EI, MPI, LCB.")
+    parser.add_argument("--acquisition_weight", default=0.1, type=float,
+                        help="The weight of the acquisition function. Defaults to 0.1")
+    parser.add_argument("--acquisition_optimiser_type", default="lbfgs", type=str,
+                        help="Which optimiser to use for the acquisition function. "
+                             "Defaults to L-BFGS. Choose from L-BFGS, DIRECT, CMA.")
     parser.add_argument("--domain_ls1", type=str,
                         help="The domain of the first hyperparameter (lengthscale1). Enter as start, finish")
     parser.add_argument("--domain_ls2", type=str,
@@ -166,15 +172,25 @@ if __name__ == '__main__':
                         help="The domain of the fourth hyperparameter (variance1). Enter as start, finish")
     parser.add_argument("--domain_v2", type=str,
                         help="The domain of the fifth hyperparameter (variance2). Enter as start, finish")
-    parser.add_argument("--acquisition_type", default="LCB", type=str,
-                        help="Type of acquisition function to use in bayesian optimisation. Defaults to LCB.")
-    parser.add_argument("--acquisition_weight", default=0.1, type=float,
-                        help="The weight of the acquisition function. Defaults to 0.1")
+    parser.add_argument("--initial_design", default="random", type=str,
+                        help="The type of initial design, where to collect points. "
+                             "Defaults to random. Choose from random, latin.")
+    parser.add_argument("--lat", default=51.875, type=float,
+                        help="The latitude of the point we want to investigate. Defaults to 51.875.")
+    parser.add_argument("--lon", default=0.9375, type=float,
+                        help="The longitude of the point we want to investigate. Defaults to 0.9375.")
+    parser.add_argument("--model_type", default="GP", type=str,
+                        help="The type of model to use. Defaults to GP. Choose from: GP, sparseGP, warpedGP, RF.")
+    parser.add_argument("--num_iterations", default=20, type=int,
+                        help="Number of iterations of bayesian optimisation. Defaults to 20.")
+    parser.add_argument("--num_months", default=1980, type=int,
+                        help="How many months of data to consider, starting 01-01-1850. Defaults to 1980.")
+    parser.add_argument("--training_size", default=0.8, type=float,
+                        help="Percentage of the data to use for training. Defaults to 0.8.")
 
     args = parser.parse_args()
     parsed_domain_tuples = []
 
-    # TODO: unit test the tuple parsing.
     for domain in [args.domain_ls1, args.domain_ls2, args.domain_ls3, args.domain_v1, args.domain_v2]:
         if domain is not None:
             bounds = domain.split(",")
@@ -187,8 +203,11 @@ if __name__ == '__main__':
 
     optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
                                                           dom_tuples=parsed_domain_tuples,
+                                                          model_type=args.model_type,
+                                                          initial_design_type=args.initial_design,
                                                           acquisition_type=args.acquisition_type,
-                                                          acquisition_weight=args.acquisition_weight)
+                                                          acquisition_weight=args.acquisition_weight,
+                                                          acquisition_optimiser_type=args.acquisition_optimiser_type,)
 
     # TODO: figure out a suitable filename.
     composite_filename = f"something"
