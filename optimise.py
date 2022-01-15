@@ -45,8 +45,8 @@ def log(file_out, exp_args, hparams, final_error, time_elapsed):
 
 
 def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
-    lat_str, lon_str = str(lat).replace(".", ""), str(lon).replace(".", "")
-    pr_df = pd.read_csv(f"{lat_str}_{lon_str}.csv")
+    lat_str, lon_str = str(lat).replace(".", "_"), str(lon).replace(".", "_")
+    pr_df = pd.read_csv(f"{lat_str}x{lon_str}.csv")
 
     last_train_index = int(total_entries * train_size)
 
