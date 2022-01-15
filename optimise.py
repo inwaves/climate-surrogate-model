@@ -1,4 +1,5 @@
 import argparse
+import time
 import warnings
 
 import GPy
@@ -24,17 +25,23 @@ def draw_samples(y_mean, y_std):
     return y_pred
 
 
-def log(out, args, optimal_hparams, final_error):
-    out.writelines(f"Latitude: {args.lat}, Longitude: {args.lon},"
-                   f"Number of months: {args.num_months}, Number of iterations: {args.num_iterations}\n"
-                   f"Domain of lengthscale1: {args.domain_ls1}, lengthscale2: {args.domain_ls2}, lengthscale3: {args.domain_ls3}, "
-                   f"Domain of variance1: {args.domain_v1}, variance2: {args.domain_v2}")
+def log(file_out, exp_args, hparams, final_error, time_elapsed):
+    """Log the results of the optimisation."""
+    file_out.writelines(f"----------------------------------------------------\n"
+                        f"Experiment took: {time_elapsed:.2f} seconds\n")
+    file_out.writelines(f"Experiment parameters:\n"
+                        f"Latitude: {exp_args.lat}, Longitude: {exp_args.lon}\n"
+                        f"Number of months: {exp_args.num_months}, Number of iterations: {exp_args.num_iterations}\n"
+                        f"Domain of lengthscale1: {exp_args.domain_ls1}, lengthscale2: {exp_args.domain_ls2}, "
+                        f"lengthscale3: {exp_args.domain_ls3} \n "
+                        f"Domain of variance1: {exp_args.domain_v1}, variance2: {exp_args.domain_v2}\n")
 
-    out.writelines(f"ls1: {str(optimal_hparams[0])}, ls2: {str(optimal_hparams[1])}, "
-                   f"ls3: {str(optimal_hparams[2])}, v1: {str(optimal_hparams[3])}, "
-                   f"v2: {str(optimal_hparams[4])}, best_error: {final_error}\n")
+    file_out.writelines(f"Experiment results:\n"
+                        f"ls1: {str(hparams[0])}, ls2: {str(hparams[1])}, "
+                        f"ls3: {str(hparams[2])}, v1: {str(hparams[3])}, "
+                        f"v2: {str(hparams[4])}, best_error: {final_error}\n")
 
-    out.close()
+    file_out.close()
 
 
 def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
@@ -60,7 +67,8 @@ def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
 
 def rms_error(y_true, y_pred) -> float:
     """Calculate the root mean squared error."""
-    return np.sqrt(np.square(y_true - y_pred).mean())
+    # return np.sqrt(np.square(y_true - y_pred).mean())
+    return np.sum(y_true - y_pred)
 
 
 def fit_gp(hyperparameters):
@@ -79,13 +87,7 @@ def fit_gp(hyperparameters):
         y_mean, y_std = model.predict(x_all.reshape(-1, 1))
         y_pred = draw_samples(y_mean, y_std)
 
-        # Calculate RMSE — does it even make sense to use RMSE since
-        # a GP doesn't make exact predictions, but specifies distributions
-        # over functions?
         loss += rms_error(y_all, y_pred)
-
-        # This used to be rmse += np.sum(all_y - y_pred)
-        # which isn't the actual RMSE, but gave the positive definite error fewer times.
 
     return loss
 
@@ -102,9 +104,6 @@ def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_de
         {'name': 'variance1', 'type': 'continuous', 'domain': dom_tuples[3]},
         {'name': 'variance2', 'type': 'continuous', 'domain': dom_tuples[4]}]
 
-    # TODO: add support for multiple models
-    # TODO: add support for multiple optimizers
-
     opt = GPyOpt.methods.BayesianOptimization(f=fit_gp,  # function to optimize
                                               domain=domain,  # box-constraints of the problem
                                               model_type=model_type,  # model type
@@ -118,7 +117,7 @@ def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_de
     opt.plot_convergence()  # TODO: get these out to a file.
 
     # Get the optimised hyperparameters.
-    x_best = opt.X[np.argmin(opt.Y)]
+    optimal_hparams = opt.X[np.argmin(opt.Y)]
 
     kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[3]) + \
              GPy.kern.StdPeriodic(1, lengthscale=optimal_hparams[1]) * \
@@ -135,7 +134,7 @@ def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_de
     # over functions?
     best_rmse = np.sqrt(np.square(y_all - y_pred).mean())
 
-    return x_best, best_rmse, y_mean, y_std
+    return optimal_hparams, best_rmse, y_mean, y_std
 
 
 def plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, filename):
@@ -162,15 +161,15 @@ if __name__ == '__main__':
     parser.add_argument("--acquisition_optimiser_type", default="lbfgs", type=str,
                         help="Which optimiser to use for the acquisition function. "
                              "Defaults to L-BFGS. Choose from L-BFGS, DIRECT, CMA.")
-    parser.add_argument("--domain_ls1", type=str,
+    parser.add_argument("--domain_ls1", default="0,5", type=str,
                         help="The domain of the first hyperparameter (lengthscale1). Enter as start, finish")
-    parser.add_argument("--domain_ls2", type=str,
+    parser.add_argument("--domain_ls2", default="0,1", type=str,
                         help="The domain of the second hyperparameter (lengthscale2). Enter as start, finish")
-    parser.add_argument("--domain_ls3", type=str,
+    parser.add_argument("--domain_ls3", default="0,5", type=str,
                         help="The domain of the third hyperparameter (lengthscale3). Enter as start, finish")
-    parser.add_argument("--domain_v1", type=str,
+    parser.add_argument("--domain_v1", default="0,1", type=str,
                         help="The domain of the fourth hyperparameter (variance1). Enter as start, finish")
-    parser.add_argument("--domain_v2", type=str,
+    parser.add_argument("--domain_v2", default="0,1", type=str,
                         help="The domain of the fifth hyperparameter (variance2). Enter as start, finish")
     parser.add_argument("--initial_design", default="random", type=str,
                         help="The type of initial design, where to collect points. "
@@ -201,18 +200,20 @@ if __name__ == '__main__':
                                                                lon=args.lon,
                                                                total_entries=args.num_months)
 
+    tic = time.perf_counter()
     optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
                                                           dom_tuples=parsed_domain_tuples,
                                                           model_type=args.model_type,
                                                           initial_design_type=args.initial_design,
                                                           acquisition_type=args.acquisition_type,
                                                           acquisition_weight=args.acquisition_weight,
-                                                          acquisition_optimiser_type=args.acquisition_optimiser_type,)
+                                                          acquisition_optimiser_type=args.acquisition_optimiser_type, )
+    toc = time.perf_counter()
 
     # TODO: figure out a suitable filename.
     composite_filename = f"something"
 
     out = open(f"{composite_filename}.txt", "w")
-    log(out, args, optimal_hparams, best_error)
+    log(out, args, optimal_hparams, best_error, toc - tic)
 
     plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
