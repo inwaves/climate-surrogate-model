@@ -1,0 +1,9 @@
+----------------------------------------------------
+Experiment took: 46.22 seconds
+Experiment parameters:
+Latitude: 51.875, Longitude: 0.9375
+Number of months: 1980, Number of iterations: 10
+Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0, 5.0) 
+ Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
+Experiment results:
+ls1: 3.5936231564212213, ls2: 0.2521456746608922, ls3: 0.7808754265156392, v1: 0.9754499153294696, v2: 0.1305658100121766, best_error: 1.210233209866322

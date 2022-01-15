@@ -1,6 +1,7 @@
 import argparse
 import time
 import warnings
+import itertools
 
 import GPy
 import GPyOpt
@@ -8,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from functools import partial
 from numpy.random import seed
 from scipy.stats import multivariate_normal as mvn
 
@@ -25,28 +25,26 @@ def draw_samples(y_mean, y_std):
     return y_pred
 
 
-def log(file_out, exp_args, hparams, final_error, time_elapsed):
+def log(file_out, exp_args, hparams, final_error, domains, time_elapsed):
     """Log the results of the optimisation."""
     file_out.writelines(f"----------------------------------------------------\n"
                         f"Experiment took: {time_elapsed:.2f} seconds\n")
     file_out.writelines(f"Experiment parameters:\n"
                         f"Latitude: {exp_args.lat}, Longitude: {exp_args.lon}\n"
                         f"Number of months: {exp_args.num_months}, Number of iterations: {exp_args.num_iterations}\n"
-                        f"Domain of lengthscale1: {exp_args.domain_ls1}, lengthscale2: {exp_args.domain_ls2}, "
-                        f"lengthscale3: {exp_args.domain_ls3} \n "
-                        f"Domain of variance1: {exp_args.domain_v1}, variance2: {exp_args.domain_v2}\n")
+                        f"Domain of lengthscale1: {domains[0]}, lengthscale2: {domains[1]}, "
+                        f"lengthscale3: {domains[2]} \n "
+                        f"Domain of variance1: {domains[3]}, variance2: {domains[4]}\n")
 
     file_out.writelines(f"Experiment results:\n"
                         f"ls1: {str(hparams[0])}, ls2: {str(hparams[1])}, "
                         f"ls3: {str(hparams[2])}, v1: {str(hparams[3])}, "
                         f"v2: {str(hparams[4])}, best_error: {final_error}\n")
 
-    file_out.close()
-
 
 def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
     lat_str, lon_str = str(lat).replace(".", "_"), str(lon).replace(".", "_")
-    pr_df = pd.read_csv(f"{lat_str}x{lon_str}.csv")
+    pr_df = pd.read_csv(f"./data/{lat_str}x{lon_str}.csv")
 
     last_train_index = int(total_entries * train_size)
 
@@ -65,7 +63,7 @@ def load_data(lat=51.875, lon=0.9375, total_entries=1980, train_size=0.8):
     return x_train, y_train, x_test, y_test, x_all, y_all
 
 
-def rms_error(y_true, y_pred) -> float:
+def rms_error(y_true, y_pred) -> np.ndarray:
     """Calculate the root mean squared error."""
     # return np.sqrt(np.square(y_true - y_pred).mean())
     return np.sum(y_true - y_pred)
@@ -92,10 +90,27 @@ def fit_gp(hyperparameters):
     return loss
 
 
-def grid_search_domains():
+def grid_search_domains(maximum_iterations, model_type, initial_design_type, acquisition_type,
+                        acquisition_weight, acquisition_optimiser_type, composite_filename):
     """Implement grid search over the hyperparameter domains.
     This should let you run multiple optimisation experiments and log them."""
-    pass
+    log_scales = [np.logspace(-3, 3, 2) for _ in range(5)]
+    out = open(f"{composite_filename}.txt", "a+")
+    for combination in itertools.product(*log_scales):
+        dom_tuples = [(0, val) for val in combination]
+        tic = time.perf_counter()
+        optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=maximum_iterations,
+                                                              dom_tuples=dom_tuples,
+                                                              model_type=model_type,
+                                                              initial_design_type=initial_design_type,
+                                                              acquisition_type=acquisition_type,
+                                                              acquisition_weight=acquisition_weight,
+                                                              acquisition_optimiser_type=acquisition_optimiser_type)
+        toc = time.perf_counter()
+
+        log(out, args, optimal_hparams, best_error, dom_tuples, toc - tic)
+        plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
+    out.close()
 
 
 def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_design_type="random",
@@ -128,8 +143,8 @@ def optimise(maximum_iterations=10, dom_tuples=None, model_type="GP", initial_de
     optimal_hparams = opt.X[np.argmin(opt.Y)]
 
     kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[3]) + \
-             GPy.kern.StdPeriodic(1, lengthscale=optimal_hparams[1]) * \
-             GPy.kern.PeriodicMatern32(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[4])
+        GPy.kern.StdPeriodic(1, lengthscale=optimal_hparams[1]) * \
+        GPy.kern.PeriodicMatern32(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[4])
 
     model = GPy.models.GPRegression(x_train.reshape(-1, 1), y_train.reshape(-1, 1), kernel=kernel, normalizer=True,
                                     noise_var=0.05)
@@ -179,6 +194,8 @@ if __name__ == '__main__':
                         help="The domain of the fourth hyperparameter (variance1). Enter as start, finish")
     parser.add_argument("--domain_v2", default="0,1", type=str,
                         help="The domain of the fifth hyperparameter (variance2). Enter as start, finish")
+    parser.add_argument("--grid_search", default=False, type=bool,
+                        help="Whether to perform a grid search over the domains of the hyperparameters. ")
     parser.add_argument("--initial_design", default="random", type=str,
                         help="The type of initial design, where to collect points. "
                              "Defaults to random. Choose from random, latin.")
@@ -196,33 +213,44 @@ if __name__ == '__main__':
                         help="Percentage of the data to use for training. Defaults to 0.8.")
 
     args = parser.parse_args()
-    parsed_domain_tuples = []
 
-    for domain in [args.domain_ls1, args.domain_ls2, args.domain_ls3, args.domain_v1, args.domain_v2]:
-        if domain is not None:
-            bounds = domain.split(",")
-            parsed_domain_tuples.append((float(bounds[0]), float(bounds[1])))
 
     # Load the data.
     x_train, y_train, x_test, y_test, x_all, y_all = load_data(lat=args.lat,
                                                                lon=args.lon,
                                                                total_entries=args.num_months)
 
-    tic = time.perf_counter()
-    optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
-                                                          dom_tuples=parsed_domain_tuples,
-                                                          model_type=args.model_type,
-                                                          initial_design_type=args.initial_design,
-                                                          acquisition_type=args.acquisition_type,
-                                                          acquisition_weight=args.acquisition_weight,
-                                                          acquisition_optimiser_type=args.acquisition_optimiser_type, )
-    toc = time.perf_counter()
-
-    composite_filename = f"/logs/{args.model_type}_{args.acquisition_type}_{args.acquisition_optimiser_type}_" \
+    composite_filename = f"./logs/{args.model_type}_{args.acquisition_type}_{args.acquisition_optimiser_type}_" \
                          f"{str(args.lat).replace('.', 'p')}_{str(args.lon).replace('.', 'p')}_" \
-                         f"{args.num_iterations}_{args.num_months}_{args.training_size}"
+                         f"{args.num_iterations}_{args.num_months}"
 
-    out = open(f"{composite_filename}.txt", "a")
-    log(out, args, optimal_hparams, best_error, toc - tic)
+    if args.grid_search:
+        grid_search_domains(maximum_iterations=args.num_iterations,
+                            model_type=args.model_type,
+                            initial_design_type=args.initial_design,
+                            acquisition_type=args.acquisition_type,
+                            acquisition_weight=args.acquisition_weight,
+                            acquisition_optimiser_type=args.acquisition_optimiser_type,
+                            composite_filename=composite_filename,)
+    else:
+        parsed_domain_tuples = []
 
-    plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
+        for dom in [args.domain_ls1, args.domain_ls2, args.domain_ls3, args.domain_v1, args.domain_v2]:
+            if dom is not None:
+                bounds = dom.split(",")
+                parsed_domain_tuples.append((float(bounds[0]), float(bounds[1])))
+
+        tic = time.perf_counter()
+        optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
+                                                              dom_tuples=parsed_domain_tuples,
+                                                              model_type=args.model_type,
+                                                              initial_design_type=args.initial_design,
+                                                              acquisition_type=args.acquisition_type,
+                                                              acquisition_weight=args.acquisition_weight,
+                                                              acquisition_optimiser_type=args.acquisition_optimiser_type)
+        toc = time.perf_counter()
+
+        out = open(f"{composite_filename}.txt", "a+")
+        log(out, args, optimal_hparams, best_error, parsed_domain_tuples, toc - tic)
+        out.close()
+        plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
