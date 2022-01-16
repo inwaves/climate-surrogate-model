@@ -7,3 +7,30 @@ Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0
  Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
 Experiment results:
 ls1: 4.938600508139657, ls2: 0.13641872095673602, ls3: 4.526833218031111, v1: 0.9799686872034205, v2: 0.453273681126408, best_error: 1.3881433757575974
+----------------------------------------------------
+Experiment took: 21.74 seconds
+Experiment parameters:
+Latitude: 51.875, Longitude: 0.9375
+Number of months: 100, Number of iterations: 50
+Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0, 5.0) 
+ Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
+Experiment results:
+ls1: 4.938600508139657, ls2: 0.13641872095673602, ls3: 4.526833218031111, v1: 0.9799686872034205, v2: 0.453273681126408, best_error: 14.934430875191094
+----------------------------------------------------
+Experiment took: 21.67 seconds
+Experiment parameters:
+Latitude: 51.875, Longitude: 0.9375
+Number of months: 100, Number of iterations: 50
+Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0, 5.0) 
+ Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
+Experiment results:
+ls1: 4.747061675731213, ls2: 0.5776806317195222, ls3: 4.753477982539085, v1: 0.7361758063190662, v2: 0.09032787814653365, best_error: -9.982747409134696
+----------------------------------------------------
+Experiment took: 21.46 seconds
+Experiment parameters:
+Latitude: 51.875, Longitude: 0.9375
+Number of months: 100, Number of iterations: 50
+Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0, 5.0) 
+ Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
+Experiment results:
+ls1: 4.747061675731213, ls2: 0.5776806317195222, ls3: 4.753477982539085, v1: 0.7361758063190662, v2: 0.09032787814653365, best_error: -9.982747409134696

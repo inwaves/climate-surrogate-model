@@ -6,6 +6,7 @@ gpyopt~=1.2.6
 numpy~=1.21.2
 scipy~=1.7.3
 
-proplot
+seaborn
+proj
 intake-esm
 gcsfs
