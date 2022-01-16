@@ -164,7 +164,7 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
     y_mean, y_std = model.predict(x_all.reshape(-1, 1))
     y_pred = draw_samples(y_mean, y_std)
 
-    best_rmse = rms_error(y_test, y_pred)
+    best_rmse = rms_error(y_all, y_pred)
 
     return optimal_hparams, best_rmse, y_mean, y_std
 
