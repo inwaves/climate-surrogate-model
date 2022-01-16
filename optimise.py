@@ -17,6 +17,7 @@ seed(12345)
 sns.set()
 
 
+# TODO: load global dataset instead of one single point. x[t] = [lat, lon, t]
 def load_data(lat: float = 51.875, lon: float = 0.9375, total_entries: int = 1980, train_size: float = 0.8) -> tuple:
     """Load data from a .csv file with the specified parameters.
         :param lat: The latitude of the location.
@@ -61,6 +62,8 @@ def fit_gp(hyperparameters: np.ndarray) -> float:
 
     loss = 0
     for i in range(hyperparameters.shape[0]):
+
+        # TODO: try a different model type, like sparseGP
         kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 3]) + \
                  GPy.kern.StdPeriodic(1, lengthscale=hyperparameters[i, 1]) * \
                  GPy.kern.PeriodicMatern32(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 4])
