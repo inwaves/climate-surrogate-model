@@ -29,20 +29,27 @@ def load_data(lat: float = 51.875, lon: float = 0.9375, total_entries: int = 198
     pr_df = pd.read_csv(f"./data/{lat_str}x{lon_str}.csv")
 
     last_train_index = int(total_entries * train_size)
+    last_validation_index = int(last_train_index + ((total_entries - last_train_index) // 3))
 
     training_set = pr_df.iloc[0:last_train_index]
-    test_set = pr_df.iloc[last_train_index:total_entries]
+    validation_set = pr_df.iloc[last_train_index:last_validation_index]
+    test_set = pr_df.iloc[last_validation_index:total_entries]
 
-    x_train = np.linspace(1, last_train_index, last_train_index, dtype=np.int64)
-    x_test = np.linspace(last_train_index, total_entries, total_entries - last_train_index, dtype=np.int64)
-    x_all = np.concatenate((x_train, x_test))
+    x_train = np.linspace(1, last_train_index,
+                          last_train_index, dtype=np.int64)
+    x_valid = np.linspace(last_train_index, last_validation_index,
+                          last_validation_index - last_train_index, dtype=np.int64)
+    x_test = np.linspace(last_validation_index, total_entries,
+                         total_entries - last_validation_index, dtype=np.int64)
+    x_all = np.concatenate((x_train, x_valid, x_test))
 
     # Renormalise precipitation measurements since they're all approximately r*10^-5
     y_train = (training_set["pr"].to_numpy()) * 10 ** 5
+    y_valid = (validation_set["pr"].to_numpy()) * 10 ** 5
     y_test = test_set["pr"].to_numpy() * 10 ** 5
-    y_all = np.concatenate([y_train, y_test])
+    y_all = np.concatenate([y_train, y_valid, y_test])
 
-    return x_train, y_train, x_test, y_test, x_all, y_all
+    return x_train, y_train, x_valid, y_valid, x_test, y_test, x_all, y_all
 
 
 def fit_gp(hyperparameters: np.ndarray) -> float:
@@ -59,10 +66,13 @@ def fit_gp(hyperparameters: np.ndarray) -> float:
                  GPy.kern.PeriodicMatern32(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 4])
         model = GPy.models.GPRegression(x_train.reshape(-1, 1), y_train.reshape(-1, 1), kernel=kernel, normalizer=True,
                                         noise_var=0.05)
-        y_mean, y_std = model.predict(x_all.reshape(-1, 1))
+
+        # Here we must *only* predict on the validation set, not on all the values.
+        # We want to tune the hyperparameters using just this data.
+        y_mean, y_std = model.predict(x_valid.reshape(-1, 1))
         y_pred = draw_samples(y_mean, y_std)
 
-        loss += rms_error(y_all, y_pred)
+        loss += rms_error(y_valid, y_pred)
 
     return loss
 
@@ -108,7 +118,9 @@ def grid_search_domains(k: int, maximum_iterations: int, model_type: str, initia
         toc = time.perf_counter()
 
         log(out, args, optimal_hparams, best_error, dom_tuples, toc - tic)
-        plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
+        plot_fitted_model(x_train, x_valid, x_test, x_all,
+                          y_train, y_valid, y_test, y_mean, y_std,
+                          f"{composite_filename}.png")
     out.close()
 
 
@@ -161,6 +173,8 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
     model = GPy.models.GPRegression(x_train.reshape(-1, 1), y_train.reshape(-1, 1), kernel=kernel, normalizer=True,
                                     noise_var=0.05)
 
+    # We are done optimising, so we can now make predictions
+    # for the entire dataset, including the test set.
     y_mean, y_std = model.predict(x_all.reshape(-1, 1))
     y_pred = draw_samples(y_mean, y_std)
 
@@ -169,15 +183,17 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
     return optimal_hparams, best_rmse, y_mean, y_std
 
 
-def plot_fitted_model(x_train: np.ndarray, x_test: np.ndarray, x_all: np.ndarray,
-                      y_train: np.ndarray, y_test: np.ndarray, y_mean: np.ndarray, y_std: np.ndarray,
-                      filename) -> None:
+def plot_fitted_model(x_train: np.ndarray, x_valid: np.ndarray, x_test: np.ndarray, x_all: np.ndarray,
+                      y_train: np.ndarray, y_valid: np.ndarray, y_test: np.ndarray, y_mean: np.ndarray,
+                      y_std: np.ndarray, filename) -> None:
     """Plots a fitted GP model's predictions.
         :param x_train: The training set months.
+        :param x_valid: The validation set months.
         :param x_test: The test set months.
         :param x_all: The full training + test set.
         :param y_train: The training precipitation values.
         :param y_test: The test precipitation values.
+        :param y_valid: The validation precipitation values.
         :param y_mean: The mean of the predictions.
         :param y_std: The standard deviation of the predictions.
         :param filename: The filename to save the plot to.
@@ -186,6 +202,7 @@ def plot_fitted_model(x_train: np.ndarray, x_test: np.ndarray, x_all: np.ndarray
     plt.xlabel("time")
     plt.ylabel("precipitation")
     plt.scatter(x_train, y_train, lw=1, color="b", label="training dataset")
+    plt.scatter(x_valid, y_valid, lw=1, color="y", label="validation dataset")
     plt.scatter(x_test, y_test, lw=1, color="r", label="testing dataset")
     plt.plot(x_all, y_mean, lw=3, color="g", label="GP mean")
     plt.fill_between(x_all, (y_mean + y_std).reshape(y_mean.shape[0]), (y_mean - y_std).reshape(y_mean.shape[0]),
@@ -198,9 +215,9 @@ if __name__ == '__main__':
     args = parse_args()
 
     # Load the data.
-    x_train, y_train, x_test, y_test, x_all, y_all = load_data(lat=args.lat,
-                                                               lon=args.lon,
-                                                               total_entries=args.num_months)
+    x_train, y_train, x_test, y_test, x_valid, y_valid, x_all, y_all = load_data(lat=args.lat,
+                                                                                 lon=args.lon,
+                                                                                 total_entries=args.num_months)
 
     composite_filename = f"./logs/{args.model_type}_{args.acquisition_type}_{args.acquisition_optimiser_type}_" \
                          f"{str(args.lat).replace('.', 'p')}_{str(args.lon).replace('.', 'p')}_" \
@@ -217,7 +234,7 @@ if __name__ == '__main__':
                             acquisition_type=args.acquisition_type,
                             acquisition_weight=args.acquisition_weight,
                             acquisition_optimiser_type=args.acquisition_optimiser_type,
-                            composite_filename=composite_filename,)
+                            composite_filename=composite_filename, )
     else:
         parsed_domain_tuples = []
 
@@ -240,4 +257,6 @@ if __name__ == '__main__':
         out = open(f"{composite_filename}.txt", "a+")
         log(out, args, optimal_hparams, best_error, parsed_domain_tuples, toc - tic)
         out.close()
-        plot_fitted_model(x_train, x_test, x_all, y_train, y_test, y_mean, y_std, f"{composite_filename}.png")
+        plot_fitted_model(x_train, x_valid, x_test, x_all,
+                          y_train, y_valid, y_test, y_mean, y_std,
+                          f"{composite_filename}.png")
