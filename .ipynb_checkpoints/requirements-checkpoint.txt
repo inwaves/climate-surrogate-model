@@ -1,8 +1,0 @@
-intake
-xarray
-proplot
-matplotlib
-pandas
-torch
-gpytorch
-cftime
