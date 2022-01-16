@@ -61,14 +61,15 @@ def fit_gp(hyperparameters: np.ndarray) -> float:
     """
 
     loss = 0
+    y_mean = y_train.mean()
     for i in range(hyperparameters.shape[0]):
 
         # TODO: try a different model type, like sparseGP
         kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 3]) + \
                  GPy.kern.StdPeriodic(1, lengthscale=hyperparameters[i, 1]) * \
                  GPy.kern.PeriodicMatern32(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 4])
-        model = GPy.models.GPRegression(x_train.reshape(-1, 1), y_train.reshape(-1, 1), kernel=kernel, normalizer=True,
-                                        noise_var=0.05)
+        model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train-y_mean).reshape(-1, 1), kernel=kernel,
+                                        normalizer=True, noise_var=0.05)
 
         # Here we must *only* predict on the validation set, not on all the values.
         # We want to tune the hyperparameters using just this data.
@@ -168,13 +169,14 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
 
     # Get the optimised hyperparameters.
     optimal_hparams = opt.X[np.argmin(opt.Y)]
+    y_mean = y_train.mean()
 
     kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[3]) + \
         GPy.kern.StdPeriodic(1, lengthscale=optimal_hparams[1]) * \
         GPy.kern.PeriodicMatern32(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[4])
 
-    model = GPy.models.GPRegression(x_train.reshape(-1, 1), y_train.reshape(-1, 1), kernel=kernel, normalizer=True,
-                                    noise_var=0.05)
+    model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train-y_mean).reshape(-1, 1), kernel=kernel,
+                                    normalizer=False, noise_var=0.05)
 
     # We are done optimising, so we can now make predictions
     # for the entire dataset, including the test set.
@@ -204,9 +206,9 @@ def plot_fitted_model(x_train: np.ndarray, x_valid: np.ndarray, x_test: np.ndarr
     plt.figure(figsize=(10, 5), dpi=100)
     plt.xlabel("time")
     plt.ylabel("precipitation")
-    plt.scatter(x_train, y_train, lw=1, color="b", label="training dataset")
-    plt.scatter(x_valid, y_valid, lw=1, color="y", label="validation dataset")
-    plt.scatter(x_test, y_test, lw=1, color="r", label="testing dataset")
+    plt.scatter(x_train, y_train-y_train.mean(), lw=1, color="b", label="training dataset")
+    plt.scatter(x_valid, y_valid-y_valid.mean(), lw=1, color="y", label="validation dataset")
+    plt.scatter(x_test, y_test-y_test.mean(), lw=1, color="r", label="testing dataset")
     plt.plot(x_all, y_mean, lw=3, color="g", label="GP mean")
     plt.fill_between(x_all, (y_mean + y_std).reshape(y_mean.shape[0]), (y_mean - y_std).reshape(y_mean.shape[0]),
                      facecolor="b", alpha=0.3, label="confidence")
