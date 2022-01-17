@@ -70,3 +70,12 @@ Domain of lengthscale1: (0.0, 5.0), lengthscale2: (0.0, 1.0), lengthscale3: (0.0
  Domain of variance1: (0.0, 1.0), variance2: (0.0, 1.0)
 Experiment results:
 ls1: 4.747061675731213, ls2: 0.5776806317195222, ls3: 4.753477982539085, v1: 0.7361758063190662, v2: 0.09032787814653365, best_error: 208.10300780454784
+----------------------------------------------------
+Experiment took: 22.56 seconds
+Experiment parameters:
+Latitude: 51.875, Longitude: 0.9375
+Number of months: 100, Number of iterations: 50
+Domain of lengthscale1: (0.0, 30.0), lengthscale2: (0.0, 30.0), lengthscale3: (0.0, 30.0) 
+ Domain of variance1: (0.0, 30.0), variance2: (0.0, 10.0)
+Experiment results:
+ls1: 12.403920658463592, ls2: 17.12744314486832, ls3: 7.5662600131923465, ls4 = 22.82911831530119v1: 1.1756997772229716, v2: 7.508882820465751v3: 9.285839293213243, v4: 8.13776280160202, best_error: 168.10043027212066

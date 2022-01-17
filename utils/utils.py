@@ -12,7 +12,7 @@ def draw_samples(y_mean, y_std):
     return y_pred
 
 
-def log(file_out, exp_args, hparams, final_error, domains, time_elapsed):
+def log(file_out, kernel, exp_args, hparams, final_error, domains, time_elapsed):
     """Log the results of the optimisation."""
     file_out.writelines(f"----------------------------------------------------\n"
                         f"Experiment took: {time_elapsed:.2f} seconds\n")
@@ -23,10 +23,20 @@ def log(file_out, exp_args, hparams, final_error, domains, time_elapsed):
                         f"lengthscale3: {domains[2]} \n "
                         f"Domain of variance1: {domains[3]}, variance2: {domains[4]}\n")
 
-    file_out.writelines(f"Experiment results:\n"
-                        f"ls1: {str(hparams[0])}, ls2: {str(hparams[1])}, "
-                        f"ls3: {str(hparams[2])}, v1: {str(hparams[3])}, "
-                        f"v2: {str(hparams[4])}, best_error: {final_error}\n")
+    if kernel == 1:
+        file_out.writelines(f"Experiment results:\n"
+                            f"ls1: {str(hparams[0])}, ls2: {str(hparams[1])}, "
+                            f"ls3: {str(hparams[2])}, ls4 = {str(hparams[3])}"
+                            f"v1: {str(hparams[4])}, v2: {str(hparams[5])}"
+                            f"v3: {str(hparams[6])}, v4: {str(hparams[7])}"
+                            f", best_error: {final_error}\n")
+    else:
+        file_out.writelines(f"Experiment results:\n"
+                            f"ls1: {str(hparams[0])}, ls2: {str(hparams[1])}, "
+                            f"ls3: {str(hparams[2])}, ls4 = {str(hparams[3])}, ls5 = {str(hparams[4])}"
+                            f"v1: {str(hparams[5])}, v2: {str(hparams[6])}, v3: {str(hparams[7])}"
+                            f"v4: {str(hparams[8])}, v5: {str(hparams[9])}, v6: {str(hparams[10])}"
+                            f", best_error: {final_error}\n")
 
 
 def rms_error(y_true, y_pred) -> np.ndarray:
@@ -46,16 +56,6 @@ def parse_args():
     parser.add_argument("--acquisition_optimiser_type", default="lbfgs", type=str,
                         help="Which optimiser to use for the acquisition function. "
                              "Defaults to L-BFGS. Choose from L-BFGS, DIRECT, CMA.")
-    parser.add_argument("--domain_ls1", default="0,5", type=str,
-                        help="The domain of the first hyperparameter (lengthscale1). Enter as start, finish")
-    parser.add_argument("--domain_ls2", default="0,1", type=str,
-                        help="The domain of the second hyperparameter (lengthscale2). Enter as start, finish")
-    parser.add_argument("--domain_ls3", default="0,5", type=str,
-                        help="The domain of the third hyperparameter (lengthscale3). Enter as start, finish")
-    parser.add_argument("--domain_v1", default="0,1", type=str,
-                        help="The domain of the fourth hyperparameter (variance1). Enter as start, finish")
-    parser.add_argument("--domain_v2", default="0,1", type=str,
-                        help="The domain of the fifth hyperparameter (variance2). Enter as start, finish")
     parser.add_argument("--grid_search", default=False, type=bool,
                         help="Whether to perform a grid search over the domains of the hyperparameters. ")
     parser.add_argument("--initial_design", default="random", type=str,
@@ -63,6 +63,8 @@ def parse_args():
                              "Defaults to random. Choose from random, latin.")
     parser.add_argument("--k", default=2, type=int,
                         help="The number of domain values to explore per hyperparameter.")
+    parser.add_argument("--kernel", default=1, type=int,
+                        help="Which kernel to use. 1 is the RBF-Cosine, 2 is the RBF-Cosine-Noise.")
     parser.add_argument("--lat", default=51.875, type=float,
                         help="The latitude of the point we want to investigate. Defaults to 51.875.")
     parser.add_argument("--lon", default=0.9375, type=float,

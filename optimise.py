@@ -53,7 +53,7 @@ def load_data(lat: float = 51.875, lon: float = 0.9375, total_entries: int = 198
     return x_train, y_train, x_valid, y_valid, x_test, y_test, x_all, y_all
 
 
-def fit_gp(hyperparameters: np.ndarray) -> float:
+def fit_gp_k1(hyperparameters: np.ndarray) -> float:
     """This function initialises a Gaussian process given :param hyperparameters,
         fits it to the data, and calculates the error of the test set predictions.
         :param hyperparameters: A vector containing the hyperparameters to optimise.
@@ -63,12 +63,12 @@ def fit_gp(hyperparameters: np.ndarray) -> float:
     loss = 0
     y_mean = y_train.mean()
     for i in range(hyperparameters.shape[0]):
-
         # TODO: try a different model type, like sparseGP
-        kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 3]) + \
-                 GPy.kern.StdPeriodic(1, lengthscale=hyperparameters[i, 1]) * \
-                 GPy.kern.PeriodicMatern32(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 4])
-        model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train-y_mean).reshape(-1, 1), kernel=kernel,
+        kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 4]) + \
+                 (GPy.kern.RBF(1, lengthscale=hyperparameters[i, 1], variance=hyperparameters[i, 5]) *
+                  GPy.kern.Cosine(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 6])) + \
+                 GPy.kern.sde_RatQuad(1, lengthscale=hyperparameters[i, 3], variance=hyperparameters[i, 7])
+        model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train - y_mean).reshape(-1, 1), kernel=kernel,
                                         normalizer=True, noise_var=0.05)
 
         # Here we must *only* predict on the validation set, not on all the values.
@@ -81,12 +81,43 @@ def fit_gp(hyperparameters: np.ndarray) -> float:
     return loss
 
 
-def grid_search_domains(k: int, maximum_iterations: int, model_type: str, initial_design_type: str,
+def fit_gp_k2(hyperparameters: np.ndarray) -> float:
+    """This function initialises a Gaussian process given :param hyperparameters,
+        fits it to the data, and calculates the error of the test set predictions.
+        :param hyperparameters: A vector containing the hyperparameters to optimise.
+        :return: The total error of the model with these hyperparameters.
+    """
+
+    loss = 0
+    y_mean = y_train.mean()
+    for i in range(hyperparameters.shape[0]):
+        # TODO: try a different model type, like sparseGP
+        kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 5]) + \
+                 (GPy.kern.RBF(1, lengthscale=hyperparameters[i, 1], variance=hyperparameters[i, 6]) *
+                  GPy.kern.Cosine(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 7])) + \
+                 GPy.kern.sde_RatQuad(1, hyperparameters[i, 3], variance=hyperparameters[i, 8]) + \
+                 (GPy.kern.RBF(1, lengthscale=hyperparameters[i, 4], variance=hyperparameters[i, 9]) *
+                  GPy.kern.sde_White(1, variance=hyperparameters[i, 10]))
+        model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train - y_mean).reshape(-1, 1), kernel=kernel,
+                                        normalizer=True, noise_var=0.05)
+
+        # Here we must *only* predict on the validation set, not on all the values.
+        # We want to tune the hyperparameters using just this data.
+        y_mean, y_std = model.predict(x_valid.reshape(-1, 1))
+        y_pred = draw_samples(y_mean, y_std)
+
+        loss += rms_error(y_valid, y_pred)
+
+    return loss
+
+
+def grid_search_domains(k: int, kernel: int, maximum_iterations: int, model_type: str, initial_design_type: str,
                         acquisition_type: str, acquisition_weight: float, acquisition_optimiser_type: str,
                         composite_filename: str) -> None:
     """Implements grid search over the hyperparameter domains, then runs optimisation
         for each combination of domains.
         :param k: The number of values to consider for each hyperparameter.
+        :param kernel: Kernel 1 is RBF-Cosine, kernel 2 is RBF-Cosine-Noise.
         :param maximum_iterations: The maximum number of iterations to run the optimiser for.
         :param model_type: The type of model to use.
         :param initial_design_type: The type of initial design to use (random, latin hypercube).
@@ -99,10 +130,11 @@ def grid_search_domains(k: int, maximum_iterations: int, model_type: str, initia
     # Generate hyperparameter domains on a log-scale grid.
     # The grid starts at 10^-3 and ends at 10^3.
     # :param k controls the number of values to generate.
-    # Note that this means k^5 experiments are going to be run.
+    # Note that this means k^num_parameters experiments are going to be run.
     # Generating e.g. 0.01 for a given hyperparameter means
     # its domain is going to be [0, 0.01].
-    log_scales = [np.logspace(-3, 3, k) for _ in range(5)]
+    num_hparams = 8 if kernel == 1 else 11
+    log_scales = [np.logspace(-3, 3, k) for _ in range(num_hparams)]
 
     out = open(f"{composite_filename}.txt", "a+")
 
@@ -112,27 +144,27 @@ def grid_search_domains(k: int, maximum_iterations: int, model_type: str, initia
 
         # Run optimisation using the domains generated.
         tic = time.perf_counter()
-        optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=maximum_iterations,
-                                                              dom_tuples=dom_tuples,
-                                                              model_type=model_type,
+        optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=maximum_iterations, kernel_choice=args.kernel,
+                                                              dom_tuples=dom_tuples, model_type=model_type,
                                                               initial_design_type=initial_design_type,
                                                               acquisition_type=acquisition_type,
                                                               acquisition_weight=acquisition_weight,
                                                               acquisition_optimiser_type=acquisition_optimiser_type)
         toc = time.perf_counter()
 
-        log(out, args, optimal_hparams, best_error, dom_tuples, toc - tic)
+        log(out, kernel, args, optimal_hparams, best_error, dom_tuples, toc - tic)
         plot_fitted_model(x_train, x_valid, x_test, x_all,
                           y_train, y_valid, y_test, y_mean, y_std,
                           f"{composite_filename}.png")
     out.close()
 
 
-def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model_type: str = "GP",
+def optimise(maximum_iterations: int = 10, kernel_choice: int = 1, dom_tuples: list[tuple] = None, model_type: str = "GP",
              initial_design_type: str = "random", acquisition_type: str = "LCB", acquisition_weight: float = 0.1,
              acquisition_optimiser_type: str = "lbfgs") -> tuple:
     """Runs the optimisation algorithm for a given set of hyperparameter domains.
         Also takes in other hyperparameters for the optimisation procedure.
+        :param kernel_choice: Kernel 1 is RBF-Cosine, kernel 2 is RBF-Cosine-Noise.
         :param maximum_iterations: The maximum number of iterations to run the optimiser for.
         :param dom_tuples: The hyperparameter domains to consider.
         :param model_type: The type of model to use.
@@ -142,24 +174,46 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
         :param acquisition_optimiser_type: The type of optimiser to use.
         :return: The optimal hyperparameters, the best error, the mean and standard deviation of the predictions.
     """
+    if kernel_choice == 1:
+        domain = [
+            {'name': 'lengthscale1', 'type': 'continuous', 'domain': dom_tuples[0]},
+            {'name': 'lengthscale2', 'type': 'continuous', 'domain': dom_tuples[1]},
+            {'name': 'lengthscale3', 'type': 'continuous', 'domain': dom_tuples[2]},
+            {'name': 'lengthscale4', 'type': 'continuous', 'domain': dom_tuples[3]},
+            {'name': 'variance1', 'type': 'continuous', 'domain': dom_tuples[4]},
+            {'name': 'variance2', 'type': 'continuous', 'domain': dom_tuples[5]},
+            {'name': 'variance3', 'type': 'continuous', 'domain': dom_tuples[6]},
+            {'name': 'variance4', 'type': 'continuous', 'domain': dom_tuples[7]}]
 
-    if dom_tuples is None:
-        dom_tuples = [(0., 5.), (0., 1.), (0., 5.), (0., 1.), (0., 1.)]
+        opt = GPyOpt.methods.BayesianOptimization(f=fit_gp_k1,  # function to optimize
+                                                  domain=domain,  # box-constraints of the problem
+                                                  model_type=model_type,  # model type
+                                                  initial_design_type=initial_design_type,  # initial design
+                                                  acquisition_type=acquisition_type,  # acquisition function
+                                                  acquisition_weight=acquisition_weight,
+                                                  acquisition_optimizer_type=acquisition_optimiser_type)
 
-    domain = [
-        {'name': 'lengthscale1', 'type': 'continuous', 'domain': dom_tuples[0]},
-        {'name': 'lengthscale2', 'type': 'continuous', 'domain': dom_tuples[1]},
-        {'name': 'lengthscale3', 'type': 'continuous', 'domain': dom_tuples[2]},
-        {'name': 'variance1', 'type': 'continuous', 'domain': dom_tuples[3]},
-        {'name': 'variance2', 'type': 'continuous', 'domain': dom_tuples[4]}]
+    else:
+        domain = [
+            {'name': 'lengthscale1', 'type': 'continuous', 'domain': dom_tuples[0]},
+            {'name': 'lengthscale2', 'type': 'continuous', 'domain': dom_tuples[1]},
+            {'name': 'lengthscale3', 'type': 'continuous', 'domain': dom_tuples[2]},
+            {'name': 'lengthscale4', 'type': 'continuous', 'domain': dom_tuples[3]},
+            {'name': 'lengthscale5', 'type': 'continuous', 'domain': dom_tuples[4]},
+            {'name': 'variance1', 'type': 'continuous', 'domain': dom_tuples[5]},
+            {'name': 'variance2', 'type': 'continuous', 'domain': dom_tuples[6]},
+            {'name': 'variance3', 'type': 'continuous', 'domain': dom_tuples[7]},
+            {'name': 'variance4', 'type': 'continuous', 'domain': dom_tuples[8]},
+            {'name': 'variance5', 'type': 'continuous', 'domain': dom_tuples[9]},
+            {'name': 'variance6', 'type': 'continuous', 'domain': dom_tuples[10]}]
 
-    opt = GPyOpt.methods.BayesianOptimization(f=fit_gp,  # function to optimize
-                                              domain=domain,  # box-constraints of the problem
-                                              model_type=model_type,  # model type
-                                              initial_design_type=initial_design_type,  # initial design
-                                              acquisition_type=acquisition_type,  # acquisition function
-                                              acquisition_weight=acquisition_weight,
-                                              acquisition_optimizer_type=acquisition_optimiser_type)
+        opt = GPyOpt.methods.BayesianOptimization(f=fit_gp_k2,  # function to optimize
+                                                  domain=domain,  # box-constraints of the problem
+                                                  model_type=model_type,  # model type
+                                                  initial_design_type=initial_design_type,  # initial design
+                                                  acquisition_type=acquisition_type,  # acquisition function
+                                                  acquisition_weight=acquisition_weight,
+                                                  acquisition_optimizer_type=acquisition_optimiser_type)
 
     # Optimise the hyperparameters.
     opt.run_optimization(max_iter=maximum_iterations)
@@ -171,11 +225,20 @@ def optimise(maximum_iterations: int = 10, dom_tuples: list[tuple] = None, model
     optimal_hparams = opt.X[np.argmin(opt.Y)]
     y_mean = y_train.mean()
 
-    kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[3]) + \
-        GPy.kern.StdPeriodic(1, lengthscale=optimal_hparams[1]) * \
-        GPy.kern.PeriodicMatern32(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[4])
-
-    model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train-y_mean).reshape(-1, 1), kernel=kernel,
+    if kernel_choice == 1:
+        kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[4]) + \
+                 (GPy.kern.RBF(1, lengthscale=optimal_hparams[1], variance=optimal_hparams[5]) *
+                  GPy.kern.Cosine(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[6])) + \
+                 GPy.kern.sde_RatQuad(1, lengthscale=optimal_hparams[3], variance=optimal_hparams[7])
+    else:
+        kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[5]) + \
+                 (GPy.kern.RBF(1, lengthscale=optimal_hparams[1], variance=optimal_hparams[6]) *
+                  GPy.kern.Cosine(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[7])) + \
+                 GPy.kern.sde_RatQuad(1, optimal_hparams[3], variance=optimal_hparams[8]) + \
+                 (GPy.kern.RBF(1, lengthscale=optimal_hparams[4], variance=optimal_hparams[9]) *
+                  GPy.kern.sde_White(1, variance=optimal_hparams[10]))
+        
+    model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train - y_mean).reshape(-1, 1), kernel=kernel,
                                     normalizer=False, noise_var=0.05)
 
     # We are done optimising, so we can now make predictions
@@ -205,10 +268,10 @@ def plot_fitted_model(x_train: np.ndarray, x_valid: np.ndarray, x_test: np.ndarr
     """
     plt.figure(figsize=(10, 5), dpi=100)
     plt.xlabel("time")
-    plt.ylabel("precipitation")
-    plt.scatter(x_train, y_train-y_train.mean(), lw=1, color="b", label="training dataset")
-    plt.scatter(x_valid, y_valid-y_valid.mean(), lw=1, color="y", label="validation dataset")
-    plt.scatter(x_test, y_test-y_test.mean(), lw=1, color="r", label="testing dataset")
+    plt.ylabel("residual")
+    plt.scatter(x_train, y_train - y_train.mean(), lw=1, color="b", label="training dataset")
+    plt.scatter(x_valid, y_valid - y_valid.mean(), lw=1, color="y", label="validation dataset")
+    plt.scatter(x_test, y_test - y_test.mean(), lw=1, color="r", label="testing dataset")
     plt.plot(x_all, y_mean, lw=3, color="g", label="GP mean")
     plt.fill_between(x_all, (y_mean + y_std).reshape(y_mean.shape[0]), (y_mean - y_std).reshape(y_mean.shape[0]),
                      facecolor="b", alpha=0.3, label="confidence")
@@ -230,37 +293,35 @@ if __name__ == '__main__':
 
     # Here the flow of the program splits into two scenarios:
     # Run optimisation with domains found by grid search or
-    # with domains specified by the user as command-line arguments.
+    # with default domains.
     if args.grid_search:
-        grid_search_domains(k=args.k,
-                            maximum_iterations=args.num_iterations,
-                            model_type=args.model_type,
-                            initial_design_type=args.initial_design,
-                            acquisition_type=args.acquisition_type,
+        num_hparams = 8 if args.kernel == 1 else 11  # The first kernel has 8 hparams, the second 11.
+        grid_search_domains(k=args.k, num_hyperparameters=num_hparams,
+                            maximum_iterations=args.num_iterations, model_type=args.model_type,
+                            initial_design_type=args.initial_design, acquisition_type=args.acquisition_type,
                             acquisition_weight=args.acquisition_weight,
                             acquisition_optimiser_type=args.acquisition_optimiser_type,
-                            composite_filename=composite_filename, )
+                            composite_filename=composite_filename)
     else:
-        parsed_domain_tuples = []
-
-        for dom in [args.domain_ls1, args.domain_ls2, args.domain_ls3, args.domain_v1, args.domain_v2]:
-            if dom is not None:
-                bounds = dom.split(",")
-                parsed_domain_tuples.append((float(bounds[0]), float(bounds[1])))
+        if args.kernel == 1:
+            dom_tuples = [(0., 30.), (0., 30.), (0., 30.), (0., 30.),  # Length scale domains.
+                          (0., 10.), (0., 10.), (0., 10.), (0., 10.)]  # Variance domains.
+        else:
+            dom_tuples = [(0., 30.), (0., 30.), (0., 30.), (0., 30.), (0., 30.),             # Length scale domains.
+                          (0., 10.), (0., 10.), (0., 10.), (0., 10.), (0., 10.), (0., 10.)]   # Variance domains.
 
         tic = time.perf_counter()
         optimal_hparams, best_error, y_mean, y_std = optimise(maximum_iterations=args.num_iterations,
-                                                              dom_tuples=parsed_domain_tuples,
+                                                              kernel_choice=args.kernel, dom_tuples=dom_tuples,
                                                               model_type=args.model_type,
                                                               initial_design_type=args.initial_design,
                                                               acquisition_type=args.acquisition_type,
                                                               acquisition_weight=args.acquisition_weight,
-                                                              acquisition_optimiser_type=args.acquisition_optimiser_type
-                                                              )
+                                                              acquisition_optimiser_type=args.acquisition_optimiser_type)
         toc = time.perf_counter()
 
         out = open(f"{composite_filename}.txt", "a+")
-        log(out, args, optimal_hparams, best_error, parsed_domain_tuples, toc - tic)
+        log(out, args.kernel, args, optimal_hparams, best_error, dom_tuples, toc - tic)
         out.close()
         plot_fitted_model(x_train, x_valid, x_test, x_all,
                           y_train, y_valid, y_test, y_mean, y_std,
