@@ -95,7 +95,7 @@ def fit_gp_k2(hyperparameters: np.ndarray) -> float:
         kernel = GPy.kern.RBF(1, lengthscale=hyperparameters[i, 0], variance=hyperparameters[i, 5]) + \
                  (GPy.kern.RBF(1, lengthscale=hyperparameters[i, 1], variance=hyperparameters[i, 6]) *
                   GPy.kern.Cosine(1, lengthscale=hyperparameters[i, 2], variance=hyperparameters[i, 7])) + \
-                 GPy.kern.sde_RatQuad(1, hyperparameters[i, 3], variance=hyperparameters[i, 8]) + \
+                 GPy.kern.sde_RatQuad(1, lengthscale=hyperparameters[i, 3], variance=hyperparameters[i, 8]) + \
                  (GPy.kern.RBF(1, lengthscale=hyperparameters[i, 4], variance=hyperparameters[i, 9]) *
                   GPy.kern.sde_White(1, variance=hyperparameters[i, 10]))
         model = GPy.models.GPRegression(x_train.reshape(-1, 1), (y_train - y_mean).reshape(-1, 1), kernel=kernel,
@@ -234,7 +234,7 @@ def optimise(maximum_iterations: int = 10, kernel_choice: int = 1, dom_tuples: l
         kernel = GPy.kern.RBF(1, lengthscale=optimal_hparams[0], variance=optimal_hparams[5]) + \
                  (GPy.kern.RBF(1, lengthscale=optimal_hparams[1], variance=optimal_hparams[6]) *
                   GPy.kern.Cosine(1, lengthscale=optimal_hparams[2], variance=optimal_hparams[7])) + \
-                 GPy.kern.sde_RatQuad(1, optimal_hparams[3], variance=optimal_hparams[8]) + \
+                 GPy.kern.sde_RatQuad(1, lengthscale=optimal_hparams[3], variance=optimal_hparams[8]) + \
                  (GPy.kern.RBF(1, lengthscale=optimal_hparams[4], variance=optimal_hparams[9]) *
                   GPy.kern.sde_White(1, variance=optimal_hparams[10]))
         
@@ -307,7 +307,7 @@ if __name__ == '__main__':
             dom_tuples = [(0., 30.), (0., 30.), (0., 30.), (0., 30.),  # Length scale domains.
                           (0., 10.), (0., 10.), (0., 10.), (0., 10.)]  # Variance domains.
         else:
-            dom_tuples = [(0., 30.), (0., 30.), (0., 30.), (0., 30.), (0., 30.),             # Length scale domains.
+            dom_tuples = [(0., 10.), (0., 10.), (0., 10.), (0., 10.), (0., 10.),             # Length scale domains.
                           (0., 10.), (0., 10.), (0., 10.), (0., 10.), (0., 10.), (0., 10.)]   # Variance domains.
 
         tic = time.perf_counter()
